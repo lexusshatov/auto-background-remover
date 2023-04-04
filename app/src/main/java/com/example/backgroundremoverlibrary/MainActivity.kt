@@ -1,15 +1,16 @@
 package com.example.backgroundremoverlibrary
 
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.drawable.toBitmap
+import androidx.lifecycle.lifecycleScope
 import com.example.backgroundremoverlibrary.databinding.ActivityMainBinding
 import com.slowmac.autobackgroundremover.BackgroundRemover
-import com.slowmac.autobackgroundremover.OnBackgroundChangeListener
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
@@ -38,26 +39,17 @@ class MainActivity : AppCompatActivity() {
         }
 
 
-
     }
 
 
     private fun removeBg() {
         binding.img.invalidate()
-        BackgroundRemover.bitmapForProcessing(
-            binding.img.drawable.toBitmap(),
-            true,
-            object : OnBackgroundChangeListener {
-                override fun onSuccess(bitmap: Bitmap) {
-                    binding.img.setImageBitmap(bitmap)
-                }
-
-                override fun onFailed(exception: Exception) {
-                    Toast.makeText(this@MainActivity, "Error Occur", Toast.LENGTH_SHORT).show()
-                }
-
-            })
+        val bitmap = binding.img.drawable.toBitmap()
+        lifecycleScope.launch(Dispatchers.IO) {
+            val result = BackgroundRemover.bitmapForProcessing(bitmap, false)
+            withContext(Dispatchers.Main) {
+                binding.img.setImageBitmap(result)
+            }
+        }
     }
-
-
 }

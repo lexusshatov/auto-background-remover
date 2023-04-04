@@ -2,95 +2,81 @@ package com.slowmac.autobackgroundremover
 
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.util.Log
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.segmentation.Segmentation
+import com.google.mlkit.vision.segmentation.SegmentationMask
 import com.google.mlkit.vision.segmentation.Segmenter
 import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions
 import kotlinx.coroutines.*
-import java.nio.ByteBuffer
-import kotlin.system.measureTimeMillis
+import kotlinx.coroutines.flow.asFlow
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.coroutines.suspendCoroutine
 
 
 object BackgroundRemover {
 
-    private val segment: Segmenter
-    private var buffer = ByteBuffer.allocate(0)
-    private var width = 0
-    private var height = 0
-
-
-    init {
+    // [0;1]
+    private const val MIN_CONFIDENCE = 0.4
+    private val segment: Segmenter = let {
         val segmentOptions = SelfieSegmenterOptions.Builder()
             .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
             .build()
-        segment = Segmentation.getClient(segmentOptions)
+        Segmentation.getClient(segmentOptions)
     }
-
+    private val scope = CoroutineScope(Dispatchers.IO) + SupervisorJob()
 
     /**
      * Process the image to get buffer and image height and width
      * @param bitmap Bitmap which you want to remove background.
      * @param trimEmptyPart After removing the background if its true it will remove the empty part of bitmap. by default its false.
-     * @param listener listener for success and failure callback.
      **/
-    fun bitmapForProcessing(
+    suspend fun bitmapForProcessing(
         bitmap: Bitmap,
-        trimEmptyPart: Boolean? = false,
-        listener: OnBackgroundChangeListener
-    ) {
-        //Generate a copy of bitmap just in case the if the bitmap is immutable.
+        trimEmptyPart: Boolean = false,
+    ): Bitmap {
         val copyBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
-        val input = InputImage.fromBitmap(copyBitmap, 0)
-        segment.process(input)
-            .addOnSuccessListener { segmentationMask ->
-                buffer = segmentationMask.buffer
-                width = segmentationMask.width
-                height = segmentationMask.height
-
-                CoroutineScope(Dispatchers.IO).launch {
-                    val time = measureTimeMillis {
-                        val resultBitmap = if (trimEmptyPart == true) {
-                            val bgRemovedBitmap = removeBackgroundFromImage(copyBitmap)
-                            trim(bgRemovedBitmap)
-                        } else {
-                            removeBackgroundFromImage(copyBitmap)
-                        }
-                        withContext(Dispatchers.Main) {
-                            listener.onSuccess(resultBitmap)
-                        }
-                    }
-                    Log.e("TAG", "bitmapForProcessingTime: $time")
-                }
-
-            }
-            .addOnFailureListener { e ->
-                println("Image processing failed: $e")
-                listener.onFailed(e)
-
-            }
+        val mask = getSegmentationMask(copyBitmap)
+        val bgRemovedBitmap =
+            removeBackgroundFromImage(copyBitmap, mask)
+        return if (trimEmptyPart) {
+            trim(bgRemovedBitmap)
+        } else bgRemovedBitmap
     }
+
+    private suspend fun getSegmentationMask(bitmap: Bitmap): SegmentationMask =
+        suspendCoroutine {
+            val input = InputImage.fromBitmap(bitmap, 0)
+            segment.process(input)
+                .addOnSuccessListener { segmentationMask ->
+                    it.resume(segmentationMask)
+                }
+                .addOnFailureListener { e ->
+                    it.resumeWithException(e)
+                }
+        }
 
 
     /**
      * Change the background pixels color to transparent.
      * */
     private suspend fun removeBackgroundFromImage(
-        image: Bitmap
+        image: Bitmap,
+        segmentationMask: SegmentationMask,
     ): Bitmap {
-        val bitmap = CoroutineScope(Dispatchers.IO).async {
-            for (y in 0 until height) {
-                for (x in 0 until width) {
-                    val bgConfidence = ((1.0 - buffer.float) * 255).toInt()
-                    if (bgConfidence >= 100) {
-                        image.setPixel(x, y, 0)
+        (0 until segmentationMask.height)
+            .asFlow()
+            .collect { y ->
+                (0 until segmentationMask.width).forEach { x ->
+                    val index = (segmentationMask.width * y + x) * Float.SIZE_BYTES
+                    val confidence = segmentationMask.buffer.getFloat(index)
+                    if (confidence < MIN_CONFIDENCE) {
+                        image.setPixel(x, y, Color.TRANSPARENT)
                     }
                 }
             }
-            buffer.rewind()
-            return@async image
-        }
-        return bitmap.await()
+        segmentationMask.buffer.rewind()
+        return image
     }
 
 
@@ -98,9 +84,9 @@ object BackgroundRemover {
      * trim the empty part of a bitmap.
      **/
     private suspend fun trim(
-        bitmap: Bitmap
+        bitmap: Bitmap,
     ): Bitmap {
-        val result = CoroutineScope(Dispatchers.Default).async {
+        val result = scope.async {
             var firstX = 0
             var firstY = 0
             var lastX = bitmap.width
@@ -143,5 +129,4 @@ object BackgroundRemover {
         }
         return result.await()
     }
-
 }
