@@ -15,9 +15,9 @@ import kotlin.coroutines.suspendCoroutine
 
 
 object BackgroundRemover {
-
     // [0;1]
     private const val MIN_CONFIDENCE = 0.4
+
     private val segment: Segmenter = let {
         val segmentOptions = SelfieSegmenterOptions.Builder()
             .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
@@ -34,6 +34,7 @@ object BackgroundRemover {
     suspend fun bitmapForProcessing(
         bitmap: Bitmap,
         trimEmptyPart: Boolean = false,
+        severity: Double = MIN_CONFIDENCE
     ): Bitmap {
         val copyBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
         val mask = getSegmentationMask(copyBitmap)
