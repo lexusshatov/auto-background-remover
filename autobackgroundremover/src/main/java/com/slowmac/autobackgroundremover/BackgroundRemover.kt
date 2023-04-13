@@ -34,12 +34,12 @@ object BackgroundRemover {
     suspend fun bitmapForProcessing(
         bitmap: Bitmap,
         trimEmptyPart: Boolean = false,
-        severity: Double = MIN_CONFIDENCE
+        severity: Double = MIN_CONFIDENCE,
     ): Bitmap {
         val copyBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
         val mask = getSegmentationMask(copyBitmap)
         val bgRemovedBitmap =
-            removeBackgroundFromImage(copyBitmap, mask)
+            removeBackgroundFromImage(copyBitmap, mask, severity)
         return if (trimEmptyPart) {
             trim(bgRemovedBitmap)
         } else bgRemovedBitmap
@@ -64,6 +64,7 @@ object BackgroundRemover {
     private suspend fun removeBackgroundFromImage(
         image: Bitmap,
         segmentationMask: SegmentationMask,
+        severity: Double,
     ): Bitmap {
         (0 until segmentationMask.height)
             .asFlow()
@@ -71,7 +72,7 @@ object BackgroundRemover {
                 (0 until segmentationMask.width).forEach { x ->
                     val index = (segmentationMask.width * y + x) * Float.SIZE_BYTES
                     val confidence = segmentationMask.buffer.getFloat(index)
-                    if (confidence < MIN_CONFIDENCE) {
+                    if (confidence < severity) {
                         image.setPixel(x, y, Color.TRANSPARENT)
                     }
                 }
