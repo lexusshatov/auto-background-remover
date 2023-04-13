@@ -17,6 +17,7 @@ import kotlin.coroutines.suspendCoroutine
 object BackgroundRemover {
     // [0;1]
     private const val MIN_CONFIDENCE = 0.4
+    private const val TRANSPARENCY_BOUND = 0.99
 
     private val segment: Segmenter = let {
         val segmentOptions = SelfieSegmenterOptions.Builder()
@@ -31,6 +32,7 @@ object BackgroundRemover {
      * @param bitmap Bitmap which you want to remove background.
      * @param trimEmptyPart After removing the background if its true it will remove the empty part of bitmap. by default its false.
      **/
+    @Throws(ForegroundNotFoundException::class)
     suspend fun bitmapForProcessing(
         bitmap: Bitmap,
         trimEmptyPart: Boolean = false,
@@ -66,6 +68,7 @@ object BackgroundRemover {
         segmentationMask: SegmentationMask,
         severity: Double,
     ): Bitmap {
+        var transparentCounter = 0
         (0 until segmentationMask.height)
             .asFlow()
             .collect { y ->
@@ -74,10 +77,15 @@ object BackgroundRemover {
                     val confidence = segmentationMask.buffer.getFloat(index)
                     if (confidence < severity) {
                         image.setPixel(x, y, Color.TRANSPARENT)
+                        transparentCounter++
                     }
                 }
             }
         segmentationMask.buffer.rewind()
+        val transparency = transparentCounter / (segmentationMask.height * segmentationMask.width)
+        if (transparency > TRANSPARENCY_BOUND) {
+            throw ForegroundNotFoundException()
+        }
         return image
     }
 
